@@ -1,2 +1,2 @@
-# Multi-Scale-Fuse-With-Attentation-Model
+# Multi-Scale-Fuse-With-Attention-Model
 pytortch U-net multi-scale  attentation
