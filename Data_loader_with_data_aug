@@ -1,0 +1,187 @@
+from __future__ import print_function, division
+import os
+from PIL import Image
+import torch
+import torch.utils.data
+import torchsummary
+from skimage import img_as_uint,img_as_ubyte
+from skimage.io import imsave, imread
+import torchvision
+from skimage import io
+from torch.utils.data import Dataset
+import numpy as np
+import time
+import natsort
+from torch.utils import data
+from medpy.io import load
+from skimage.transform import resize
+import shutil
+import random
+import torchvision.transforms.functional as tf
+from torch.utils.data.sampler import SubsetRandomSampler,SequentialSampler
+import argparse
+
+trainidx = list(range(106))
+class train_data_loader(torch.utils.data.Dataset):
+    def __init__(self, images_dir,labels_dir,liver_dir,pathFolder,transformI = None, transformM = None):
+        self.liverlist = [32,34,38,41,47,87,89,91,105]
+        self.ct_files = natsort.natsorted(os.listdir(images_dir))
+        self.label_files = natsort.natsorted(os.listdir(labels_dir))
+        self.images_dir = images_dir
+        self.labels_dir = labels_dir
+        self.liver_dir = liver_dir
+        self.transformI = transformI
+        self.pathFolder = pathFolder
+        self.transformM = transformM
+        if self.transformI:
+            self.tx = self.transformI
+        else:
+            self.tx = torchvision.transforms.Compose([
+#                torchvision.transforms.Resize((224,224)),
+#                torchvision.transforms.CenterCrop(96),
+#                torchvision.transforms.RandomRotation((-10,10)),
+               # torchvision.transforms.RandomHorizontalFlip(),
+#                torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
+                torchvision.transforms.ToTensor()
+#                torchvision.transforms.Normalize(mean=[0.5], std=[0.5]))
+            ])
+
+        if self.transformM:
+            self.lx = self.transformM
+        else:
+            self.lx = torchvision.transforms.Compose([
+              #  torchvision.transforms.Resize((128,128)),
+#                torchvision.transforms.CenterCrop(96),
+#                torchvision.transforms.Grayscale(),
+                torchvision.transforms.ToTensor()
+                #torchvision.transforms.Lambda(lambda x: torch.cat([x, 1 - x], dim=0))
+            ])
+
+    def __len__(self):
+        return 100000
+
+
+    def __getitem__(self, idx): 
+        if idx >= len(self):
+            raise StopIteration
+        i = random.choice(trainidx)
+        images1 = natsort.natsorted(os.listdir(os.path.join(self.images_dir,self.ct_files[i])))[0:-2]
+        images2 = natsort.natsorted(os.listdir(os.path.join(self.images_dir,self.ct_files[i])))[1:-1]
+        images3 = natsort.natsorted(os.listdir(os.path.join(self.images_dir,self.ct_files[i])))[2:]
+        labels = natsort.natsorted(os.listdir(os.path.join(self.labels_dir,self.label_files[i])))[1:-1]    
+        
+        num = np.random.randint(0,6)
+        j = np.random.randint(1,len(images2))
+        flip_num = np.random.randint(0,3)
+        if num < 3 or (i in self.liverlist):
+            if flip_num == 0:
+                i1 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + images1[j]))
+                i2 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + images2[j]))
+                i3 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + images3[j]))
+                ix = torch.cat((i1,i2,i3),dim = 0)
+                l = self.tx(Image.open(self.labels_dir + self.label_files[i] + '/' + labels[j]))
+                liver = self.tx(Image.open(self.liver_dir + self.label_files[i] + '/' + labels[j]))
+            elif flip_num == 1:
+                i1 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images1[j])))
+                i2 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images2[j])))
+                i3 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images3[j])))
+                ix = torch.cat((i1,i2,i3),dim = 0)
+                l = self.tx(tf.vflip(Image.open(self.labels_dir + self.label_files[i] + '/' + labels[j])))
+                liver = self.tx(tf.vflip(Image.open(self.liver_dir + self.label_files[i] + '/' + labels[j])))
+            elif flip_num == 2:
+                i1 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images1[j])))
+                i2 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images2[j])))
+                i3 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + images3[j])))
+                ix = torch.cat((i1,i2,i3),dim = 0)
+                l = self.tx(tf.hflip(Image.open(self.labels_dir + self.label_files[i] + '/' + labels[j])))
+                liver = self.tx(tf.hflip(Image.open(self.liver_dir + self.label_files[i] + '/' + labels[j])))          
+        else:
+            f1 = open(self.pathFolder + str(i) + '.txt','r')
+            tumorline = f1.readlines()
+            f1.close()
+            numid = len(tumorline)       
+            sed = np.random.randint(,numid)
+            cen = tumorline[sed-1]    
+            cen = np.fromstring(cen, dtype=int, sep=' ')
+            if flip_num == 0:
+                i1 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2])+'.tif'))
+                i2 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+1)+'.tif'))
+                i3 = self.tx(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+2)+'.tif'))
+                ix = torch.cat([i1,i2,i3],dim = 0)
+                l = self.tx(Image.open(self.labels_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png'))
+                liver = self.tx(Image.open(self.liver_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png'))
+            elif flip_num == 1:
+                i1 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2])+'.tif')))
+                i2 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+1)+'.tif')))
+                i3 = self.tx(tf.vflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+2)+'.tif')))
+                ix = torch.cat((i1,i2,i3),dim = 0)
+                l = self.tx(tf.vflip(Image.open(self.labels_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png')))
+                liver = self.tx(tf.vflip(Image.open(self.liver_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png')))              
+            elif flip_num == 2:
+                i1 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2])+'.tif')))
+                i2 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+1)+'.tif')))
+                i3 = self.tx(tf.hflip(Image.open(self.images_dir + self.ct_files[i] + '/' + str(cen[2]+2)+'.tif')))
+                ix = torch.cat((i1,i2,i3),dim = 0)
+                l = self.tx(tf.hflip(Image.open(self.labels_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png')))
+                liver = self.tx(tf.hflip(Image.open(self.liver_dir + self.label_files[i] + '/' + str(cen[2]+1)+'.png')))
+        return ix,l,liver
+        
+class test_data_loader(torch.utils.data.Dataset):
+    """Class for getting individual transformations and data
+    Args:
+        images_dir = path of input images
+        labels_dir = path of labeled images
+        transformI = Input Images transformation (default: None)
+        transformM = Input Labels transformation (default: None)
+    Output:
+        tx = Transformed images
+        lx = Transformed labels"""
+
+    def __init__(self, images_dir,labels_dir,transformI = None, transformM = None):
+        self.images1 = natsort.natsorted(os.listdir(images_dir))[0:-2]
+        self.images2 = natsort.natsorted(os.listdir(images_dir))[1:-1]
+        self.images3 = natsort.natsorted(os.listdir(images_dir))[2:]
+        self.labels = natsort.natsorted(os.listdir(labels_dir))[1:-1]
+        self.images_dir = images_dir
+        self.labels_dir = labels_dir
+        self.transformI = transformI
+        self.transformM = transformM
+ 
+
+        if self.transformI:
+            self.tx = self.transformI
+        else:
+            self.tx = torchvision.transforms.Compose([
+#                torchvision.transforms.Resize((224,224)),
+#                torchvision.transforms.CenterCrop(96),
+#                torchvision.transforms.RandomRotation((-10,10)),
+               # torchvision.transforms.RandomHorizontalFlip(),
+#                torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
+                torchvision.transforms.ToTensor()
+#                torchvision.transforms.Normalize(mean=[0.5], std=[0.5]))
+            ])
+
+        if self.transformM:
+            self.lx = self.transformM
+        else:
+            self.lx = torchvision.transforms.Compose([
+              #  torchvision.transforms.Resize((128,128)),
+#                torchvision.transforms.CenterCrop(96),
+#                torchvision.transforms.Grayscale(),
+                torchvision.transforms.ToTensor()
+                #torchvision.transforms.Lambda(lambda x: torch.cat([x, 1 - x], dim=0))
+            ])
+
+    def __len__(self):
+
+        return len(self.images1)
+
+    def __getitem__(self, i): 
+        i1 = self.tx(Image.open(self.images_dir + self.images1[i]))
+        i2 = self.tx(Image.open(self.images_dir + self.images2[i]))
+        i3 = self.tx(Image.open(self.images_dir + self.images3[i]))
+        ix = torch.cat((i1,i2,i3),dim = 0)
+        l = self.tx(Image.open(self.labels_dir + self.labels[i]))
+#        ix = ix+160
+#        ix = ix/400
+        return ix,l
